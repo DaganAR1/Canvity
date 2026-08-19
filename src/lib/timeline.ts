@@ -1,12 +1,19 @@
-// Groups assignments into the buckets the timeline renders.
+// Groups everything due into the buckets the timeline renders. Entries come
+// from two places — Canvas assignments and dated items pulled out of a course
+// syllabus — and share one ordering so a syllabus-only exam can't hide behind
+// the assignment list.
 
-export interface TimelineAssignment {
+export interface TimelineEntry {
   id: string;
+  source: "assignment" | "syllabus";
   name: string;
-  htmlUrl: string | null;
-  dueAt: string | null;
+  url: string | null;
+  date: string | null;
+  /** Assignments only. */
   pointsPossible: number | null;
-  hasSubmitted: boolean;
+  /** Syllabus items only: what kind of thing it is, and any extra specifics. */
+  syllabusKind: string | null;
+  detail: string | null;
   priorityScore: number;
   priorityTier: string;
   course: { id: string; name: string; courseCode: string | null };
@@ -17,7 +24,7 @@ export type BucketKey = "overdue" | "today" | "tomorrow" | "this_week" | "next_w
 export interface TimelineBucket {
   key: BucketKey;
   label: string;
-  assignments: TimelineAssignment[];
+  entries: TimelineEntry[];
 }
 
 const BUCKET_ORDER: { key: BucketKey; label: string }[] = [
@@ -48,22 +55,21 @@ export function bucketFor(dueAt: Date | null, now: Date): BucketKey {
   return "later";
 }
 
-export function buildTimeline(assignments: TimelineAssignment[], now: Date = new Date()): TimelineBucket[] {
-  const byBucket = new Map<BucketKey, TimelineAssignment[]>();
+export function buildTimeline(entries: TimelineEntry[], now: Date = new Date()): TimelineBucket[] {
+  const byBucket = new Map<BucketKey, TimelineEntry[]>();
 
-  for (const a of assignments) {
-    if (a.hasSubmitted) continue;
-    const key = bucketFor(a.dueAt ? new Date(a.dueAt) : null, now);
+  for (const entry of entries) {
+    const key = bucketFor(entry.date ? new Date(entry.date) : null, now);
     const list = byBucket.get(key) ?? [];
-    list.push(a);
+    list.push(entry);
     byBucket.set(key, list);
   }
 
   return BUCKET_ORDER.map(({ key, label }) => ({
     key,
     label,
-    assignments: (byBucket.get(key) ?? []).sort((a, b) => b.priorityScore - a.priorityScore),
-  })).filter((bucket) => bucket.assignments.length > 0);
+    entries: (byBucket.get(key) ?? []).sort((a, b) => b.priorityScore - a.priorityScore),
+  })).filter((bucket) => bucket.entries.length > 0);
 }
 
 function addDays(date: Date, days: number): Date {

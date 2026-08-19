@@ -11,25 +11,29 @@ function getClient(): Resend {
   return client;
 }
 
-export interface DigestAssignment {
+export interface DigestEntry {
   name: string;
   courseName: string;
   dueAt: Date | null;
   priorityTier: string;
-  url: string | null;
+  /** Items found in a syllabus are flagged, since they have no Canvas page to open. */
+  fromSyllabus?: boolean;
 }
 
-export async function sendDigestEmail(to: string, assignments: DigestAssignment[]) {
+export async function sendDigestEmail(to: string, entries: DigestEntry[]) {
   const from = process.env.EMAIL_FROM ?? "Canvity <notifications@canvity.app>";
 
-  const rows = assignments
+  const rows = entries
     .map((a) => {
       const due = a.dueAt ? a.dueAt.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "No due date";
       const tierColor = { critical: "#dc2626", high: "#ea580c", normal: "#2563eb", low: "#64748b" }[a.priorityTier] ?? "#64748b";
+      const badge = a.fromSyllabus
+        ? ` <span style="font-size:10px;font-weight:600;color:#7e22ce;border:1px solid #d8b4fe;border-radius:3px;padding:1px 4px;text-transform:uppercase;">syllabus</span>`
+        : "";
       return `
         <tr>
           <td style="padding:10px 0;border-bottom:1px solid #e5e7eb;">
-            <div style="font-weight:600;color:#111827;">${escapeHtml(a.name)}</div>
+            <div style="font-weight:600;color:#111827;">${escapeHtml(a.name)}${badge}</div>
             <div style="font-size:13px;color:#6b7280;">${escapeHtml(a.courseName)} &middot; ${due}</div>
           </td>
           <td style="padding:10px 0;border-bottom:1px solid #e5e7eb;text-align:right;">
@@ -49,7 +53,7 @@ export async function sendDigestEmail(to: string, assignments: DigestAssignment[
   await getClient().emails.send({
     from,
     to,
-    subject: `Canvity: ${assignments.length} assignment${assignments.length === 1 ? "" : "s"} on your radar`,
+    subject: `Canvity: ${entries.length} item${entries.length === 1 ? "" : "s"} on your radar`,
     html,
   });
 }

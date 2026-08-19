@@ -77,6 +77,40 @@ export function computePriority(input: PriorityInput): PriorityResult {
   return { score, tier: scoreToTier(score, daysUntilDue), daysUntilDue };
 }
 
+/**
+ * Scores a dated item pulled out of a syllabus. These carry no point value, so
+ * importance comes from how the syllabus itself frames them, but they run
+ * through the same urgency curve as assignments so both can share one timeline.
+ */
+export function computeSyllabusPriority(input: {
+  date: Date | null;
+  importance: string;
+  courseWeight: number;
+  now?: Date;
+}): PriorityResult {
+  const now = input.now ?? new Date();
+  const daysUntilDue = diffInDays(input.date, now);
+
+  const base = SYLLABUS_IMPORTANCE[input.importance] ?? SYLLABUS_IMPORTANCE.medium;
+  const importance = Math.min(100, base * clampWeight(input.courseWeight));
+
+  const urgency = computeUrgency(daysUntilDue, importance);
+  const amplitude = IMPORTANCE_FLOOR + (1 - IMPORTANCE_FLOOR) * (importance / 100);
+  const score = Math.round(Math.max(0, Math.min(100, urgency * amplitude)) * 10) / 10;
+
+  return { score, tier: scoreToTier(score, daysUntilDue), daysUntilDue };
+}
+
+// An exam named in a syllabus is treated as comparable to a heavily weighted
+// assignment group, since that is usually exactly what it is. The low end is
+// kept genuinely low so an optional reading due tomorrow cannot outrank an exam
+// that is a week and a half out.
+const SYLLABUS_IMPORTANCE: Record<string, number> = {
+  high: 90,
+  medium: 50,
+  low: 12,
+};
+
 function diffInDays(dueAt: Date | null, now: Date): number | null {
   if (!dueAt) return null;
   return (dueAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);

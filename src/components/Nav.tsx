@@ -8,6 +8,7 @@ export default function Nav() {
         <Link href="/" className="text-lg font-bold">Canvity</Link>
         <nav className="flex items-center gap-5 text-sm">
           <Link href="/" className="hover:text-blue-600">Timeline</Link>
+          <Link href="/syllabus" className="hover:text-blue-600">Syllabus</Link>
           <Link href="/settings" className="hover:text-blue-600">Settings</Link>
           <form
             action={async () => {

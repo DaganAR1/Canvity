@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import Nav from "@/components/Nav";
 import Timeline from "@/components/Timeline";
-import { TimelineAssignment } from "@/lib/timeline";
+import { TimelineEntry } from "@/lib/timeline";
 
 export const dynamic = "force-dynamic";
 
@@ -16,23 +16,49 @@ export default async function HomePage() {
     select: { domain: true, lastSyncedAt: true, lastSyncError: true },
   });
 
-  const rows = await prisma.assignment.findMany({
-    where: { course: { canvasAccount: { userId: session.user.id }, isActive: true } },
-    include: { course: { select: { id: true, name: true, courseCode: true } } },
-    orderBy: [{ priorityScore: "desc" }, { dueAt: "asc" }],
-  });
+  const courseScope = { canvasAccount: { userId: session.user.id }, isActive: true };
 
-  const assignments: TimelineAssignment[] = rows.map((a) => ({
-    id: a.id,
-    name: a.name,
-    htmlUrl: a.htmlUrl,
-    dueAt: a.dueAt ? a.dueAt.toISOString() : null,
-    pointsPossible: a.pointsPossible,
-    hasSubmitted: a.hasSubmitted,
-    priorityScore: a.priorityScore,
-    priorityTier: a.priorityTier,
-    course: a.course,
-  }));
+  const [assignmentRows, syllabusRows] = await Promise.all([
+    prisma.assignment.findMany({
+      where: { course: courseScope, hasSubmitted: false },
+      include: { course: { select: { id: true, name: true, courseCode: true } } },
+    }),
+    // Undated syllabus items are policies and facts — they belong on the
+    // syllabus page, not in a list of things with deadlines.
+    prisma.syllabusItem.findMany({
+      where: { course: courseScope, date: { not: null } },
+      include: { course: { select: { id: true, name: true, courseCode: true } } },
+    }),
+  ]);
+
+  const entries: TimelineEntry[] = [
+    ...assignmentRows.map((a) => ({
+      id: `assignment:${a.id}`,
+      source: "assignment" as const,
+      name: a.name,
+      url: a.htmlUrl,
+      date: a.dueAt ? a.dueAt.toISOString() : null,
+      pointsPossible: a.pointsPossible,
+      syllabusKind: null,
+      detail: null,
+      priorityScore: a.priorityScore,
+      priorityTier: a.priorityTier,
+      course: a.course,
+    })),
+    ...syllabusRows.map((s) => ({
+      id: `syllabus:${s.id}`,
+      source: "syllabus" as const,
+      name: s.title,
+      url: null,
+      date: s.date ? s.date.toISOString() : null,
+      pointsPossible: null,
+      syllabusKind: s.kind,
+      detail: s.detail,
+      priorityScore: s.priorityScore,
+      priorityTier: s.priorityTier,
+      course: s.course,
+    })),
+  ];
 
   return (
     <>
@@ -59,7 +85,7 @@ export default async function HomePage() {
                 Last sync had a problem: {canvasAccount.lastSyncError}
               </p>
             )}
-            <Timeline assignments={assignments} />
+            <Timeline entries={entries} />
             {canvasAccount.lastSyncedAt && (
               <p className="mt-8 text-xs text-[var(--muted)]">
                 Last synced {canvasAccount.lastSyncedAt.toLocaleString()}

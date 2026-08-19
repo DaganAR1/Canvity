@@ -19,6 +19,15 @@ export interface CanvasSubmission {
   workflow_state: string;
 }
 
+export interface CanvasFile {
+  id: number;
+  display_name: string;
+  filename: string;
+  "content-type": string;
+  url: string;
+  size: number;
+}
+
 export interface CanvasAssignment {
   id: number;
   name: string;
@@ -137,7 +146,49 @@ export class CanvasClient {
       "include[]": ["submission"],
     });
   }
+
+  /** The HTML body of the course's Canvas "Syllabus" page, if the instructor filled one in. */
+  async getSyllabusBody(courseId: number): Promise<string | null> {
+    const course = await this.request<{ syllabus_body: string | null }>(`/courses/${courseId}`, {
+      "include[]": ["syllabus_body"],
+    });
+    return course.syllabus_body ?? null;
+  }
+
+  /**
+   * Files in the course whose name looks like a syllabus. Many instructors
+   * upload a PDF instead of (or as well as) filling in the Canvas page.
+   */
+  async findSyllabusFiles(courseId: number): Promise<CanvasFile[]> {
+    // Courses can hide the Files tab, which 401/403s rather than 404s.
+    const files = await this.requestPaginated<CanvasFile>(`/courses/${courseId}/files`, {
+      search_term: "syllabus",
+    }).catch(() => [] as CanvasFile[]);
+
+    return files.filter((f) => SUPPORTED_SYLLABUS_TYPES.has(f["content-type"]));
+  }
+
+  /**
+   * Downloads a Canvas file. Canvas usually returns a pre-signed URL that needs
+   * no auth, but some installs return one that does. The token is attached only
+   * when the URL points back at the same Canvas host — many installs redirect
+   * file downloads to third-party storage, and the token must not leak there.
+   */
+  async downloadFile(file: CanvasFile): Promise<Buffer> {
+    const sameHost = new URL(file.url).host === new URL(this.baseUrl).host;
+    const res = await fetch(file.url, {
+      cache: "no-store",
+      headers: sameHost ? { Authorization: `Bearer ${this.token}` } : {},
+      redirect: "follow",
+    });
+    if (!res.ok) {
+      throw new CanvasApiError(`Could not download ${file.display_name}: ${res.status}`, res.status);
+    }
+    return Buffer.from(await res.arrayBuffer());
+  }
 }
+
+const SUPPORTED_SYLLABUS_TYPES = new Set(["application/pdf", "text/plain", "text/html"]);
 
 function parseNextLink(linkHeader: string | null): string | null {
   if (!linkHeader) return null;

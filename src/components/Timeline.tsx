@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { buildTimeline, TimelineAssignment } from "@/lib/timeline";
+import { buildTimeline, TimelineEntry } from "@/lib/timeline";
 
 const TIER_STYLES: Record<string, { dot: string; label: string; text: string }> = {
   critical: { dot: "bg-red-500", label: "Critical", text: "text-red-600" },
@@ -12,12 +12,12 @@ const TIER_STYLES: Record<string, { dot: string; label: string; text: string }> 
   done: { dot: "bg-green-500", label: "Done", text: "text-green-600" },
 };
 
-export default function Timeline({ assignments }: { assignments: TimelineAssignment[] }) {
+export default function Timeline({ entries }: { entries: TimelineEntry[] }) {
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  const buckets = useMemo(() => buildTimeline(assignments), [assignments]);
+  const buckets = useMemo(() => buildTimeline(entries), [entries]);
 
   async function handleSync() {
     setSyncing(true);
@@ -68,45 +68,66 @@ export default function Timeline({ assignments }: { assignments: TimelineAssignm
               <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
                 {bucket.label}
                 <span className="rounded-full bg-[var(--card)] px-2 py-0.5 text-xs font-medium normal-case border border-[var(--border)]">
-                  {bucket.assignments.length}
+                  {bucket.entries.length}
                 </span>
               </h2>
               <ul className="space-y-2">
-                {bucket.assignments.map((a) => {
-                  const tier = TIER_STYLES[a.priorityTier] ?? TIER_STYLES.normal;
+                {bucket.entries.map((entry) => {
+                  const tier = TIER_STYLES[entry.priorityTier] ?? TIER_STYLES.normal;
                   return (
                     <li
-                      key={a.id}
+                      key={entry.id}
                       className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
                     >
                       <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${tier.dot}`} aria-hidden />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-3">
-                          {a.htmlUrl ? (
-                            <a
-                              href={a.htmlUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="truncate font-medium hover:text-blue-600 hover:underline"
-                            >
-                              {a.name}
-                            </a>
-                          ) : (
-                            <span className="truncate font-medium">{a.name}</span>
-                          )}
+                          <span className="flex min-w-0 items-baseline gap-2">
+                            {entry.url ? (
+                              <a
+                                href={entry.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="truncate font-medium hover:text-blue-600 hover:underline"
+                              >
+                                {entry.name}
+                              </a>
+                            ) : (
+                              <span className="truncate font-medium">{entry.name}</span>
+                            )}
+                            {entry.source === "syllabus" && (
+                              <span
+                                className="shrink-0 rounded border border-purple-300 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-purple-700 dark:border-purple-800 dark:text-purple-300"
+                                title="Found in the course syllabus, not in Canvas assignments"
+                              >
+                                Syllabus
+                              </span>
+                            )}
+                          </span>
                           <span className={`shrink-0 text-xs font-semibold ${tier.text}`}>{tier.label}</span>
                         </div>
+
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--muted)]">
-                          <span>{a.course.courseCode || a.course.name}</span>
+                          <span>{entry.course.courseCode || entry.course.name}</span>
                           <span aria-hidden>·</span>
-                          <span>{formatDue(a.dueAt)}</span>
-                          {a.pointsPossible !== null && (
+                          <span>{formatDue(entry.date)}</span>
+                          {entry.pointsPossible !== null && (
                             <>
                               <span aria-hidden>·</span>
-                              <span>{a.pointsPossible} pts</span>
+                              <span>{entry.pointsPossible} pts</span>
+                            </>
+                          )}
+                          {entry.syllabusKind && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span className="capitalize">{entry.syllabusKind}</span>
                             </>
                           )}
                         </div>
+
+                        {entry.detail && (
+                          <p className="mt-1.5 text-xs leading-relaxed text-[var(--muted)]">{entry.detail}</p>
+                        )}
                       </div>
                     </li>
                   );
@@ -120,10 +141,10 @@ export default function Timeline({ assignments }: { assignments: TimelineAssignm
   );
 }
 
-function formatDue(dueAt: string | null): string {
-  if (!dueAt) return "No due date";
-  const date = new Date(dueAt);
-  return date.toLocaleString(undefined, {
+function formatDue(date: string | null): string {
+  if (!date) return "No due date";
+  const parsed = new Date(date);
+  return parsed.toLocaleString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",

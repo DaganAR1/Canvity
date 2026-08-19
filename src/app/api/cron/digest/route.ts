@@ -28,30 +28,49 @@ export async function GET(req: NextRequest) {
   for (const user of users) {
     if (user.lastDigestSentAt && isSameUtcDay(user.lastDigestSentAt, now)) continue;
 
-    const assignments = await prisma.assignment.findMany({
-      where: {
-        hasSubmitted: false,
-        course: { canvasAccount: { userId: user.id }, isActive: true },
-      },
-      include: { course: { select: { name: true } } },
-      orderBy: [{ priorityScore: "desc" }, { dueAt: "asc" }],
-      take: 10,
-    });
+    const courseScope = { canvasAccount: { userId: user.id }, isActive: true };
 
-    if (assignments.length === 0) continue;
+    const [assignments, syllabusItems] = await Promise.all([
+      prisma.assignment.findMany({
+        where: { hasSubmitted: false, course: courseScope },
+        include: { course: { select: { name: true } } },
+        orderBy: [{ priorityScore: "desc" }, { dueAt: "asc" }],
+        take: 10,
+      }),
+      prisma.syllabusItem.findMany({
+        where: { date: { not: null }, course: courseScope },
+        include: { course: { select: { name: true } } },
+        orderBy: [{ priorityScore: "desc" }, { date: "asc" }],
+        take: 10,
+      }),
+    ]);
+
+    const entries = [
+      ...assignments.map((a) => ({
+        name: a.name,
+        courseName: a.course.name,
+        dueAt: a.dueAt,
+        priorityTier: a.priorityTier,
+        priorityScore: a.priorityScore,
+        fromSyllabus: false,
+      })),
+      ...syllabusItems.map((s) => ({
+        name: s.title,
+        courseName: s.course.name,
+        dueAt: s.date,
+        priorityTier: s.priorityTier,
+        priorityScore: s.priorityScore,
+        fromSyllabus: true,
+      })),
+    ]
+      .sort((a, b) => b.priorityScore - a.priorityScore)
+      .slice(0, 10);
+
+    if (entries.length === 0) continue;
 
     // One user's delivery failure must not stop everyone else's digest.
     try {
-      await sendDigestEmail(
-        user.email,
-        assignments.map((a) => ({
-          name: a.name,
-          courseName: a.course.name,
-          dueAt: a.dueAt,
-          priorityTier: a.priorityTier,
-          url: a.htmlUrl,
-        }))
-      );
+      await sendDigestEmail(user.email, entries);
       await prisma.user.update({ where: { id: user.id }, data: { lastDigestSentAt: now } });
       sent++;
     } catch {

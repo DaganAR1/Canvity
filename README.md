@@ -5,6 +5,10 @@ lays them out on a timeline, and reminds you before things are due.
 
 - **Syncs from Canvas** — pulls your active courses, assignments, due dates, point values,
   assignment-group weights, and submission status via the Canvas REST API.
+- **Scans your syllabi** — finds each course's syllabus (the Canvas page or an uploaded
+  PDF) and pulls out exam dates, project milestones, drop deadlines, and policies. These
+  are the deadlines that never become Canvas assignments, which is exactly why they get
+  missed. Dated ones join your timeline.
 - **Ranks by priority, not just date** — a 200-point midterm tomorrow outranks a 10-point
   discussion post due today, and a major project surfaces days before a small one does.
 - **Timeline view** — grouped into Overdue / Today / Tomorrow / This week / Next week /
@@ -33,6 +37,36 @@ Two details make the ranking behave the way a student would expect:
 Scores map to tiers: `critical` (≥65), `high` (≥45), `normal` (≥20), `low`. Anything
 overdue and unsubmitted is always `critical`.
 
+## Syllabus scanning
+
+Open **Syllabus** in the nav and scan a course. Canvity looks for the syllabus in two
+places, preferring an uploaded file since instructors who upload one usually leave the
+Canvas page as a stub pointing at it:
+
+1. A course file whose name contains "syllabus" (PDF, text, or HTML)
+2. The course's Canvas syllabus page
+
+The text (or the PDF itself) goes to Claude, which returns structured items: dated ones
+(exams, milestones, drop deadlines) and undated ones (grading breakdown, late-work
+policy, required materials). Dated items join the timeline with a **Syllabus** badge and
+are scored on the same curve as assignments, using the importance the syllabus implies.
+
+A few details worth knowing:
+
+- **Bare dates get anchored.** Syllabi write "Oct 3", not "2026-10-03". Canvity passes the
+  first and last due dates of the course's known Canvas assignments as a term window so
+  the year resolves correctly, and instructs the model never to invent a date it can't
+  pin down.
+- **Re-scanning is free when nothing changed.** The syllabus text is hashed, and an
+  unchanged hash skips the extraction call. "Rescan" forces one anyway.
+- **Optional items never push.** Something the syllabus marks as low importance (an
+  optional reading) still appears on the timeline and in the digest but will not trigger a
+  notification.
+- **Re-scanning replaces** that course's items, so edits to a syllabus don't leave stale
+  dates behind.
+
+Scanning requires `ANTHROPIC_API_KEY`. Everything else in the app works without it.
+
 ## Setup
 
 ### 1. Install and configure
@@ -56,6 +90,7 @@ npm run generate-vapid-keys
 
 `DATABASE_URL` points at any Postgres instance (Vercel Postgres, Supabase, Neon, or local).
 `RESEND_API_KEY` and `EMAIL_FROM` are only needed for email digests — push works without them.
+`ANTHROPIC_API_KEY` is only needed for syllabus scanning.
 
 ### 2. Create the database schema
 
@@ -105,4 +140,4 @@ UTC day per user.
 ## Tech stack
 
 Next.js (App Router) · TypeScript · Tailwind · Prisma + Postgres · NextAuth (credentials)
-· web-push (VAPID) · Resend
+· web-push (VAPID) · Resend · Anthropic SDK (Claude Opus 5, structured outputs)

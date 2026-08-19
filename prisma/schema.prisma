@@ -47,9 +47,45 @@ model Course {
   weight          Float    @default(1.0)
   isActive        Boolean  @default(true)
 
-  assignments Assignment[]
+  // Syllabus scanning state
+  syllabusSource    String?   // where the text came from, e.g. "Canvas syllabus page" or "syllabus.pdf"
+  syllabusHash      String?   // sha256 of the source text; unchanged hash skips re-extraction
+  syllabusScannedAt DateTime?
+  syllabusError     String?
+
+  assignments   Assignment[]
+  syllabusItems SyllabusItem[]
 
   @@unique([canvasAccountId, canvasCourseId])
+}
+
+// Something worth knowing that was pulled out of a course syllabus — an exam
+// date, a project milestone, a drop deadline, a grading policy. These often
+// never exist as Canvas assignments, which is exactly why they get missed.
+model SyllabusItem {
+  id       String @id @default(cuid())
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  kind       String // "exam" | "quiz" | "project" | "assignment" | "deadline" | "reading" | "policy" | "resource" | "other"
+  title      String
+  detail     String?
+  date       DateTime? // null for undated facts like a grading breakdown
+  endDate    DateTime? // set when the item spans a range
+  importance String    @default("medium") // "high" | "medium" | "low" — as judged from the syllabus
+  // The sentence this came from, so the user can sanity-check the extraction.
+  sourceQuote String?
+
+  priorityScore Float  @default(0)
+  priorityTier  String @default("normal")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notificationLogs NotificationLog[]
+
+  @@index([courseId])
+  @@index([date])
 }
 
 model Assignment {
@@ -90,17 +126,20 @@ model PushSubscription {
   createdAt DateTime @default(now())
 }
 
-// Tracks which (assignment, channel, kind) notifications have already been sent
-// so cron jobs never send duplicates.
+// Tracks which notifications have already gone out so cron jobs never send
+// duplicates. Exactly one of assignmentId / syllabusItemId is set per row.
 model NotificationLog {
-  id           String   @id @default(cuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignmentId String
-  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  channel      String   // "push" | "email"
-  kind         String   // "due_soon" | "high_priority" | "digest"
-  sentAt       DateTime @default(now())
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignmentId   String?
+  assignment     Assignment?   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  syllabusItemId String?
+  syllabusItem   SyllabusItem? @relation(fields: [syllabusItemId], references: [id], onDelete: Cascade)
+  channel        String // "push" | "email"
+  kind           String // "due_24h" | "due_72h_critical" | "digest"
+  sentAt         DateTime      @default(now())
 
   @@unique([userId, assignmentId, channel, kind])
+  @@unique([userId, syllabusItemId, channel, kind])
 }
