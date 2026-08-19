@@ -1,0 +1,152 @@
+import { prisma } from "@/lib/prisma";
+import { decryptToken } from "@/lib/crypto";
+import { CanvasApiError, CanvasClient } from "@/lib/canvas";
+import { computePriority } from "@/lib/priority";
+
+export interface SyncResult {
+  coursesSynced: number;
+  assignmentsSynced: number;
+}
+
+/** Pulls active courses + assignments from Canvas for one user and upserts them, recomputing priority. */
+export async function syncUserCanvasData(userId: string): Promise<SyncResult> {
+  const canvasAccount = await prisma.canvasAccount.findUnique({
+    where: { userId },
+    include: { courses: true },
+  });
+
+  if (!canvasAccount) {
+    throw new Error("No Canvas account is connected for this user");
+  }
+
+  const token = decryptToken(canvasAccount.encryptedToken);
+  const client = new CanvasClient(canvasAccount.domain, token);
+
+  let coursesSynced = 0;
+  let assignmentsSynced = 0;
+
+  try {
+    const canvasCourses = await client.getActiveCourses();
+
+    for (const canvasCourse of canvasCourses) {
+      const course = await prisma.course.upsert({
+        where: {
+          canvasAccountId_canvasCourseId: {
+            canvasAccountId: canvasAccount.id,
+            canvasCourseId: String(canvasCourse.id),
+          },
+        },
+        update: {
+          name: canvasCourse.name,
+          courseCode: canvasCourse.course_code,
+          isActive: true,
+        },
+        create: {
+          canvasAccountId: canvasAccount.id,
+          canvasCourseId: String(canvasCourse.id),
+          name: canvasCourse.name,
+          courseCode: canvasCourse.course_code,
+        },
+      });
+      coursesSynced++;
+
+      const [groups, assignments] = await Promise.all([
+        client.getAssignmentGroups(canvasCourse.id).catch(() => []),
+        client.getAssignments(canvasCourse.id).catch(() => []),
+      ]);
+
+      const groupWeightById = new Map<number, number | null>();
+      for (const g of groups) groupWeightById.set(g.id, g.group_weight);
+
+      for (const a of assignments) {
+        const dueAt = a.due_at ? new Date(a.due_at) : null;
+        const groupWeight = groupWeightById.get(a.assignment_group_id) ?? null;
+        const hasSubmitted =
+          a.submission?.workflow_state === "submitted" ||
+          a.submission?.workflow_state === "graded" ||
+          !!a.submission?.submitted_at;
+
+        const { score, tier } = computePriority({
+          dueAt,
+          pointsPossible: a.points_possible,
+          groupWeight,
+          hasSubmitted,
+          courseWeight: course.weight,
+        });
+
+        await prisma.assignment.upsert({
+          where: {
+            courseId_canvasAssignmentId: {
+              courseId: course.id,
+              canvasAssignmentId: String(a.id),
+            },
+          },
+          update: {
+            name: a.name,
+            description: a.description,
+            htmlUrl: a.html_url,
+            dueAt,
+            pointsPossible: a.points_possible,
+            groupWeight,
+            submittedAt: a.submission?.submitted_at ? new Date(a.submission.submitted_at) : null,
+            hasSubmitted,
+            priorityScore: score,
+            priorityTier: tier,
+          },
+          create: {
+            courseId: course.id,
+            canvasAssignmentId: String(a.id),
+            name: a.name,
+            description: a.description,
+            htmlUrl: a.html_url,
+            dueAt,
+            pointsPossible: a.points_possible,
+            groupWeight,
+            submittedAt: a.submission?.submitted_at ? new Date(a.submission.submitted_at) : null,
+            hasSubmitted,
+            priorityScore: score,
+            priorityTier: tier,
+          },
+        });
+        assignmentsSynced++;
+      }
+    }
+
+    await prisma.canvasAccount.update({
+      where: { id: canvasAccount.id },
+      data: { lastSyncedAt: new Date(), lastSyncError: null },
+    });
+  } catch (err) {
+    const message = err instanceof CanvasApiError ? err.message : "Sync failed unexpectedly";
+    await prisma.canvasAccount.update({
+      where: { id: canvasAccount.id },
+      data: { lastSyncError: message },
+    });
+    throw err;
+  }
+
+  return { coursesSynced, assignmentsSynced };
+}
+
+/** Re-scores every stored assignment against "now" without hitting Canvas. Used by cron before sending notifications. */
+export async function recomputeAllPriorities(): Promise<void> {
+  const assignments = await prisma.assignment.findMany({
+    include: { course: true },
+  });
+
+  for (const a of assignments) {
+    const { score, tier } = computePriority({
+      dueAt: a.dueAt,
+      pointsPossible: a.pointsPossible,
+      groupWeight: a.groupWeight,
+      hasSubmitted: a.hasSubmitted,
+      courseWeight: a.course.weight,
+    });
+    if (score !== a.priorityScore || tier !== a.priorityTier) {
+      await prisma.assignment.update({
+        where: { id: a.id },
+        data: { priorityScore: score, priorityTier: tier },
+      });
+    }
+  }
+}

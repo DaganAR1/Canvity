@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
+  createdAt     DateTime  @default(now())
+
+  canvasAccount     CanvasAccount?
+  pushSubscriptions PushSubscription[]
+  notificationLogs  NotificationLog[]
+
+  digestEnabled    Boolean   @default(true)
+  digestHour       Int       @default(7) // hour of day (UTC) to send the daily digest
+  lastDigestSentAt DateTime?
+}
+
+model CanvasAccount {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  domain        String // e.g. canvas.instructure.com
+  encryptedToken String // AES-encrypted Canvas API personal access token
+  lastSyncedAt  DateTime?
+  lastSyncError String?
+  createdAt     DateTime @default(now())
+
+  courses Course[]
+}
+
+model Course {
+  id              String   @id @default(cuid())
+  canvasAccountId String
+  canvasAccount   CanvasAccount @relation(fields: [canvasAccountId], references: [id], onDelete: Cascade)
+  canvasCourseId  String
+  name            String
+  courseCode      String?
+  // User-adjustable importance multiplier for this course (0.5 - 2.0), default 1.0
+  weight          Float    @default(1.0)
+  isActive        Boolean  @default(true)
+
+  assignments Assignment[]
+
+  @@unique([canvasAccountId, canvasCourseId])
+}
+
+model Assignment {
+  id                String   @id @default(cuid())
+  courseId          String
+  course            Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  canvasAssignmentId String
+  name              String
+  description       String?
+  htmlUrl           String?
+  dueAt             DateTime?
+  pointsPossible    Float?
+  groupWeight       Float?   // weight (%) of the assignment group this belongs to, if set on the course
+  submittedAt       DateTime?
+  hasSubmitted      Boolean  @default(false)
+
+  // computed priority score (higher = more urgent/important), recomputed on every sync
+  priorityScore     Float    @default(0)
+  priorityTier      String   @default("normal") // "critical" | "high" | "normal" | "low"
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  notificationLogs NotificationLog[]
+
+  @@unique([courseId, canvasAssignmentId])
+  @@index([dueAt])
+  @@index([priorityScore])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+}
+
+// Tracks which (assignment, channel, kind) notifications have already been sent
+// so cron jobs never send duplicates.
+model NotificationLog {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  channel      String   // "push" | "email"
+  kind         String   // "due_soon" | "high_priority" | "digest"
+  sentAt       DateTime @default(now())
+
+  @@unique([userId, assignmentId, channel, kind])
+}
