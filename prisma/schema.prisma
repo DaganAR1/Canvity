@@ -19,8 +19,13 @@ model User {
   notificationLogs  NotificationLog[]
 
   digestEnabled    Boolean   @default(true)
-  digestHour       Int       @default(7) // hour of day (UTC) to send the daily digest
+  digestHour       Int       @default(7) // hour of day, in `timeZone`, to send the daily digest
   lastDigestSentAt DateTime?
+
+  // IANA zone name (e.g. "America/Los_Angeles"). Defaults to UTC until the
+  // client detects and saves the real one; everything timezone-sensitive
+  // (timeline "today", digest send time, notification text) reads this.
+  timeZone String @default("UTC")
 }
 
 model CanvasAccount {
@@ -71,6 +76,11 @@ model SyllabusItem {
   title      String
   detail     String?
   date       DateTime? // null for undated facts like a grading breakdown
+  // True when the syllabus gave a date with no time ("Oct 3"), stored as that
+  // calendar date's UTC midnight — a marker, not a real instant. False means
+  // `date` is a genuine instant, resolved from the syllabus's naive wall-clock
+  // time against the course owner's timeZone at extraction time.
+  isAllDay   Boolean   @default(true)
   endDate    DateTime? // set when the item spans a range
   importance String    @default("medium") // "high" | "medium" | "low" — as judged from the syllabus
   // The sentence this came from, so the user can sanity-check the extraction.

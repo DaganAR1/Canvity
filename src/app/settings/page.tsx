@@ -17,6 +17,7 @@ export default async function SettingsPage() {
       email: true,
       digestEnabled: true,
       digestHour: true,
+      timeZone: true,
       canvasAccount: {
         select: {
           domain: true,
@@ -52,6 +53,7 @@ export default async function SettingsPage() {
         <NotificationSettings
           digestEnabled={user.digestEnabled}
           digestHour={user.digestHour}
+          timeZone={user.timeZone}
           email={user.email}
         />
 

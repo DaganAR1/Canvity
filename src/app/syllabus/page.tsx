@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import Nav from "@/components/Nav";
 import SyllabusPanel from "@/components/SyllabusPanel";
+import { safeTimeZone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +11,15 @@ export default async function SyllabusPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
 
-  const courses = await prisma.course.findMany({
-    where: { canvasAccount: { userId: session.user.id }, isActive: true },
-    include: { syllabusItems: { orderBy: [{ date: "asc" }, { title: "asc" }] } },
-    orderBy: { name: "asc" },
-  });
+  const [user, courses] = await Promise.all([
+    prisma.user.findUnique({ where: { id: session.user.id }, select: { timeZone: true } }),
+    prisma.course.findMany({
+      where: { canvasAccount: { userId: session.user.id }, isActive: true },
+      include: { syllabusItems: { orderBy: [{ date: "asc" }, { title: "asc" }] } },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  const timeZone = safeTimeZone(user?.timeZone);
 
   return (
     <>
@@ -41,6 +46,7 @@ export default async function SyllabusPage() {
             {courses.map((course) => (
               <SyllabusPanel
                 key={course.id}
+                timeZone={timeZone}
                 course={{
                   id: course.id,
                   name: course.name,
@@ -54,6 +60,7 @@ export default async function SyllabusPage() {
                     title: i.title,
                     detail: i.detail,
                     date: i.date?.toISOString() ?? null,
+                    isAllDay: i.isAllDay,
                     importance: i.importance,
                     sourceQuote: i.sourceQuote,
                   })),

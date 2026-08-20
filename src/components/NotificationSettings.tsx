@@ -1,18 +1,63 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface Props {
   digestEnabled: boolean;
   digestHour: number;
+  timeZone: string;
   email: string;
 }
 
-export default function NotificationSettings({ digestEnabled, digestHour, email }: Props) {
+// Falls back to a short curated list if the browser predates Intl.supportedValuesOf.
+const FALLBACK_TIME_ZONES = [
+  "UTC",
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Moscow",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+function supportedTimeZones(): string[] {
+  if (typeof Intl.supportedValuesOf === "function") {
+    try {
+      return Intl.supportedValuesOf("timeZone");
+    } catch {
+      // fall through
+    }
+  }
+  return FALLBACK_TIME_ZONES;
+}
+
+export default function NotificationSettings({ digestEnabled, digestHour, timeZone, email }: Props) {
   const [enabled, setEnabled] = useState(digestEnabled);
   const [hour, setHour] = useState(digestHour);
+  const [zone, setZone] = useState(timeZone);
   const [pushState, setPushState] = useState<"unsupported" | "denied" | "subscribed" | "unsubscribed" | "loading">("loading");
   const [pushError, setPushError] = useState<string | null>(null);
+
+  const zoneOptions = useMemo(() => supportedTimeZones(), []);
+  // Only worth surfacing when it would actually change something — an
+  // unconfigured account defaults to UTC, which is rarely where anyone is.
+  const detectedZone = useMemo(() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return null;
+    }
+  }, []);
+  const showDetectedBanner = detectedZone && detectedZone !== zone && zoneOptions.includes(detectedZone);
 
   useEffect(() => {
     async function check() {
@@ -31,7 +76,7 @@ export default function NotificationSettings({ digestEnabled, digestHour, email 
     check();
   }, []);
 
-  async function saveDigest(next: { digestEnabled?: boolean; digestHour?: number }) {
+  async function saveDigest(next: { digestEnabled?: boolean; digestHour?: number; timeZone?: string }) {
     await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -149,16 +194,58 @@ export default function NotificationSettings({ digestEnabled, digestHour, email 
               >
                 {Array.from({ length: 24 }, (_, h) => (
                   <option key={h} value={h}>
-                    {String(h).padStart(2, "0")}:00 UTC
+                    {formatHour(h)}
                   </option>
                 ))}
               </select>
+              <span className="text-xs text-[var(--muted)]">your time</span>
             </label>
+          )}
+        </div>
+
+        <div className="border-t border-[var(--border)] pt-5">
+          <p className="text-sm font-medium">Timezone</p>
+          <p className="text-xs text-[var(--muted)]">
+            Sets what &quot;today&quot; means on your timeline and when the digest actually goes out.
+          </p>
+          <select
+            value={zone}
+            onChange={(e) => {
+              setZone(e.target.value);
+              saveDigest({ timeZone: e.target.value });
+            }}
+            className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
+          >
+            {zoneOptions.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+          {showDetectedBanner && (
+            <p className="mt-2 text-xs text-[var(--muted)]">
+              This browser looks like it&apos;s in <span className="font-medium">{detectedZone}</span>.{" "}
+              <button
+                onClick={() => {
+                  setZone(detectedZone);
+                  saveDigest({ timeZone: detectedZone });
+                }}
+                className="font-medium text-blue-600 hover:underline"
+              >
+                Use this
+              </button>
+            </p>
           )}
         </div>
       </div>
     </section>
   );
+}
+
+function formatHour(hour: number): string {
+  const period = hour < 12 ? "AM" : "PM";
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return `${twelve}:00 ${period}`;
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {

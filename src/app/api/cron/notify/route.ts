@@ -2,20 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { recomputeAllPriorities } from "@/lib/sync";
+import { effectiveInstant } from "@/lib/syllabus";
 import { sendPushNotification } from "@/lib/push";
+import { formatAllDay, formatInZone, safeTimeZone } from "@/lib/timezone";
 
 interface Candidate {
   id: string;
   kind: "assignment" | "syllabus";
   title: string;
   courseName: string;
-  date: Date;
+  /** The real instant to compare against notification windows (24h/72h cutoffs). */
+  windowInstant: Date;
+  /**
+   * What to display: the true due instant for a timed item, or the original
+   * calendar-date marker for an all-day one — never `windowInstant`, which for
+   * an all-day item is an end-of-day instant that would read as the wrong date.
+   */
+  displayDate: Date;
+  isAllDay: boolean;
   priorityTier: string;
   url: string | null;
   userId: string;
+  timeZone: string;
   /** Syllabus items the syllabus itself frames as optional. */
   isOptional: boolean;
 }
+
+// An all-day syllabus item's stored `date` is a UTC-midnight calendar marker,
+// not a real deadline instant, and its true effective-instant cutoff (end of
+// that day in the owner's zone) can land up to ~14h either side of it. The SQL
+// prefilter below is widened by this much so no all-day item near the edge of
+// the window is missed or evaluated too early.
+const ALL_DAY_SKEW_MS = 24 * 60 * 60 * 1000;
 
 // Run frequently (e.g. every 30 min) via Vercel Cron. Sends push reminders for:
 //  - anything due within the next 24h ("due_24h", fires once)
@@ -35,11 +53,13 @@ export async function GET(req: NextRequest) {
   const [assignments, syllabusItems] = await Promise.all([
     prisma.assignment.findMany({
       where: { hasSubmitted: false, dueAt: { gte: now, lte: in72h } },
-      include: { course: { include: { canvasAccount: true } } },
+      include: { course: { include: { canvasAccount: { include: { user: { select: { timeZone: true } } } } } } },
     }),
     prisma.syllabusItem.findMany({
-      where: { date: { gte: now, lte: in72h } },
-      include: { course: { include: { canvasAccount: true } } },
+      where: {
+        date: { gte: new Date(now.getTime() - ALL_DAY_SKEW_MS), lte: new Date(in72h.getTime() + ALL_DAY_SKEW_MS) },
+      },
+      include: { course: { include: { canvasAccount: { include: { user: { select: { timeZone: true } } } } } } },
     }),
   ]);
 
@@ -49,23 +69,38 @@ export async function GET(req: NextRequest) {
       kind: "assignment" as const,
       title: a.name,
       courseName: a.course.name,
-      date: a.dueAt!,
+      windowInstant: a.dueAt!,
+      displayDate: a.dueAt!,
+      isAllDay: false,
       priorityTier: a.priorityTier,
       url: a.htmlUrl,
       userId: a.course.canvasAccount.userId,
+      timeZone: safeTimeZone(a.course.canvasAccount.user.timeZone),
       isOptional: false,
     })),
-    ...syllabusItems.map((s) => ({
-      id: s.id,
-      kind: "syllabus" as const,
-      title: s.title,
-      courseName: s.course.name,
-      date: s.date!,
-      priorityTier: s.priorityTier,
-      url: null,
-      userId: s.course.canvasAccount.userId,
-      isOptional: s.importance === "low",
-    })),
+    ...syllabusItems
+      .map((s) => {
+        const timeZone = safeTimeZone(s.course.canvasAccount.user.timeZone);
+        return {
+          id: s.id,
+          kind: "syllabus" as const,
+          title: s.title,
+          courseName: s.course.name,
+          // The true deadline instant, not the stored calendar-date marker —
+          // this is what the notification window is actually measured against.
+          windowInstant: effectiveInstant(s.date, s.isAllDay, timeZone)!,
+          displayDate: s.date!,
+          isAllDay: s.isAllDay,
+          priorityTier: s.priorityTier,
+          url: null,
+          userId: s.course.canvasAccount.userId,
+          timeZone,
+          isOptional: s.importance === "low",
+        };
+      })
+      // Re-apply the real window now that dates are true instants — the SQL
+      // prefilter above was deliberately loose.
+      .filter((c) => c.windowInstant >= now && c.windowInstant <= in72h),
   ];
 
   // One lookup of each user's devices, rather than one per candidate.
@@ -82,7 +117,7 @@ export async function GET(req: NextRequest) {
     // It still shows on the timeline and in the daily digest.
     if (candidate.isOptional) continue;
 
-    const dueSoon = candidate.date <= in24h;
+    const dueSoon = candidate.windowInstant <= in24h;
     if (!dueSoon && candidate.priorityTier !== "critical") continue;
 
     const notificationKind = dueSoon ? "due_24h" : "due_72h_critical";
@@ -101,11 +136,12 @@ export async function GET(req: NextRequest) {
     });
     if (alreadySent) continue;
 
-    const dueLabel = candidate.date.toLocaleString("en-US", {
-      weekday: "short",
-      hour: "numeric",
-      minute: "2-digit",
-    });
+    // An all-day item has no real clock time, so it gets a plain date instead
+    // of a fabricated one — the underlying instant is midnight in some zone,
+    // which is meaningless to show as "due at".
+    const dueLabel = candidate.isAllDay
+      ? formatAllDay(candidate.displayDate, { weekday: "short", month: "short", day: "numeric" })
+      : formatInZone(candidate.displayDate, candidate.timeZone, { weekday: "short", hour: "numeric", minute: "2-digit" });
     const prefix = candidate.kind === "syllabus" ? "From your syllabus" : candidate.courseName;
 
     // A failing endpoint for one device must not stop the rest of the run.

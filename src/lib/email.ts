@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { formatAllDay, formatInZone } from "@/lib/timezone";
 
 let client: Resend | null = null;
 
@@ -15,17 +16,23 @@ export interface DigestEntry {
   name: string;
   courseName: string;
   dueAt: Date | null;
+  /** True for a syllabus item with no time of day — shown as a date, not a fabricated clock time. */
+  isAllDay?: boolean;
   priorityTier: string;
   /** Items found in a syllabus are flagged, since they have no Canvas page to open. */
   fromSyllabus?: boolean;
 }
 
-export async function sendDigestEmail(to: string, entries: DigestEntry[]) {
+export async function sendDigestEmail(to: string, entries: DigestEntry[], timeZone: string) {
   const from = process.env.EMAIL_FROM ?? "Canvity <notifications@canvity.app>";
 
   const rows = entries
     .map((a) => {
-      const due = a.dueAt ? a.dueAt.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "No due date";
+      const due = !a.dueAt
+        ? "No due date"
+        : a.isAllDay
+          ? formatAllDay(a.dueAt, { weekday: "short", month: "short", day: "numeric" })
+          : formatInZone(a.dueAt, timeZone, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       const tierColor = { critical: "#dc2626", high: "#ea580c", normal: "#2563eb", low: "#64748b" }[a.priorityTier] ?? "#64748b";
       const badge = a.fromSyllabus
         ? ` <span style="font-size:10px;font-weight:600;color:#7e22ce;border:1px solid #d8b4fe;border-radius:3px;padding:1px 4px;text-transform:uppercase;">syllabus</span>`

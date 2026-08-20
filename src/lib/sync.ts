@@ -1,7 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { decryptToken } from "@/lib/crypto";
 import { CanvasApiError, CanvasClient } from "@/lib/canvas";
-import { computePriority } from "@/lib/priority";
+import { computePriority, computeSyllabusPriority } from "@/lib/priority";
+import { effectiveInstant } from "@/lib/syllabus";
+import { safeTimeZone } from "@/lib/timezone";
 
 export interface SyncResult {
   coursesSynced: number;
@@ -128,7 +130,12 @@ export async function syncUserCanvasData(userId: string): Promise<SyncResult> {
   return { coursesSynced, assignmentsSynced };
 }
 
-/** Re-scores every stored assignment against "now" without hitting Canvas. Used by cron before sending notifications. */
+/**
+ * Re-scores every stored assignment and syllabus item against "now" without
+ * hitting Canvas. Used by cron before sending notifications — a score computed
+ * once at sync/scan time goes stale as the deadline approaches, so this is what
+ * keeps "critical" actually meaning "imminent" days later.
+ */
 export async function recomputeAllPriorities(): Promise<void> {
   const assignments = await prisma.assignment.findMany({
     include: { course: true },
@@ -145,6 +152,25 @@ export async function recomputeAllPriorities(): Promise<void> {
     if (score !== a.priorityScore || tier !== a.priorityTier) {
       await prisma.assignment.update({
         where: { id: a.id },
+        data: { priorityScore: score, priorityTier: tier },
+      });
+    }
+  }
+
+  const syllabusItems = await prisma.syllabusItem.findMany({
+    include: { course: { include: { canvasAccount: { include: { user: { select: { timeZone: true } } } } } } },
+  });
+
+  for (const item of syllabusItems) {
+    const timeZone = safeTimeZone(item.course.canvasAccount.user.timeZone);
+    const { score, tier } = computeSyllabusPriority({
+      date: effectiveInstant(item.date, item.isAllDay, timeZone),
+      importance: item.importance,
+      courseWeight: item.course.weight,
+    });
+    if (score !== item.priorityScore || tier !== item.priorityTier) {
+      await prisma.syllabusItem.update({
+        where: { id: item.id },
         data: { priorityScore: score, priorityTier: tier },
       });
     }

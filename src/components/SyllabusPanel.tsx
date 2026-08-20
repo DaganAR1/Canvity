@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatAllDay, formatInZone } from "@/lib/timezone";
 
 export interface SyllabusCourse {
   id: string;
@@ -16,6 +17,7 @@ export interface SyllabusCourse {
     title: string;
     detail: string | null;
     date: string | null;
+    isAllDay: boolean;
     importance: string;
     sourceQuote: string | null;
   }[];
@@ -27,7 +29,7 @@ const IMPORTANCE_STYLES: Record<string, string> = {
   low: "text-slate-500",
 };
 
-export default function SyllabusPanel({ course }: { course: SyllabusCourse }) {
+export default function SyllabusPanel({ course, timeZone }: { course: SyllabusCourse; timeZone: string }) {
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -75,7 +77,8 @@ export default function SyllabusPanel({ course }: { course: SyllabusCourse }) {
               : scanned
                 ? "No syllabus found"
                 : "Not scanned yet"}
-            {course.syllabusScannedAt && ` · ${new Date(course.syllabusScannedAt).toLocaleDateString()}`}
+            {course.syllabusScannedAt &&
+              ` · ${formatInZone(new Date(course.syllabusScannedAt), timeZone, { dateStyle: "medium" })}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -114,7 +117,9 @@ export default function SyllabusPanel({ course }: { course: SyllabusCourse }) {
               <li key={item.id} className="text-sm">
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="font-medium">{item.title}</span>
-                  <span className="shrink-0 text-xs text-[var(--muted)]">{formatDate(item.date!)}</span>
+                  <span className="shrink-0 text-xs text-[var(--muted)]">
+                    {formatDate(item.date!, item.isAllDay, timeZone)}
+                  </span>
                 </div>
                 <p className="text-xs text-[var(--muted)]">
                   <span className={`capitalize ${IMPORTANCE_STYLES[item.importance] ?? ""}`}>{item.kind}</span>
@@ -145,11 +150,10 @@ export default function SyllabusPanel({ course }: { course: SyllabusCourse }) {
   );
 }
 
-function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+function formatDate(date: string, isAllDay: boolean, timeZone: string): string {
+  const parsed = new Date(date);
+  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
+  return isAllDay
+    ? formatAllDay(parsed, opts)
+    : formatInZone(parsed, timeZone, { ...opts, hour: "numeric", minute: "2-digit" });
 }

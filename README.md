@@ -132,10 +132,29 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://your-app.vercel.app/api/cro
 
 Notifications are de-duplicated per assignment via the `NotificationLog` table, so a
 30-minute cron never sends the same reminder twice. Digests are guarded to once per
-UTC day per user.
+calendar day *in the user's own timezone*, so a user near a UTC day boundary can't be
+sent two digests in one local day, or skipped in another.
 
-> **Note on digest timing:** `digestHour` is stored in UTC. A user wanting 7am local
-> needs to pick the corresponding UTC hour.
+## Timezones
+
+Every user has a `timeZone` (IANA name, e.g. `America/Los_Angeles`), set in Settings —
+auto-detected from the browser with a one-click "use this" prompt when it differs from
+what's stored, defaulting to UTC until then. It's the single source of truth for:
+
+- **The timeline's Today/Tomorrow/This week buckets** — grouped by calendar day in the
+  user's zone, not elapsed hours, so DST transitions (which make some local days 23 or
+  25 hours long) can't shift anything into the wrong bucket.
+- **`digestHour`** — a wall-clock hour *in that zone* ("7" means 7am for that user), not
+  UTC. The digest cron runs hourly and fetches every enabled user to check in JS, since
+  "match this hour in each user's own zone" can't be expressed as a single SQL filter.
+- **Syllabus dates.** A syllabus writes "2pm" for whoever's enrolled, not in UTC, so a
+  timed item ("Dec 15 at 2pm") is resolved against the course owner's `timeZone` into a
+  real instant. A bare date ("Oct 3", no time) is genuinely different — it names a
+  calendar date, not an instant — and is stored as a marker (`isAllDay: true`) rather
+  than guessed at as midnight-something. Bucketing and display both check `isAllDay` and
+  handle the two cases separately; scoring treats an all-day item as due through the end
+  of that day in the owner's zone, not as expiring at its raw stored marker (which would
+  otherwise read as overdue for most of the day it's actually due).
 
 ## Tech stack
 

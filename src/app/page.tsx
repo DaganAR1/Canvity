@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import Nav from "@/components/Nav";
 import Timeline from "@/components/Timeline";
 import { TimelineEntry } from "@/lib/timeline";
+import { formatInZone, safeTimeZone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +12,14 @@ export default async function HomePage() {
   const session = await auth();
   if (!session?.user?.id) return null; // middleware redirects unauthenticated users
 
-  const canvasAccount = await prisma.canvasAccount.findUnique({
-    where: { userId: session.user.id },
-    select: { domain: true, lastSyncedAt: true, lastSyncError: true },
-  });
+  const [user, canvasAccount] = await Promise.all([
+    prisma.user.findUnique({ where: { id: session.user.id }, select: { timeZone: true } }),
+    prisma.canvasAccount.findUnique({
+      where: { userId: session.user.id },
+      select: { domain: true, lastSyncedAt: true, lastSyncError: true },
+    }),
+  ]);
+  const timeZone = safeTimeZone(user?.timeZone);
 
   const courseScope = { canvasAccount: { userId: session.user.id }, isActive: true };
 
@@ -38,6 +43,7 @@ export default async function HomePage() {
       name: a.name,
       url: a.htmlUrl,
       date: a.dueAt ? a.dueAt.toISOString() : null,
+      isAllDay: false,
       pointsPossible: a.pointsPossible,
       syllabusKind: null,
       detail: null,
@@ -51,6 +57,7 @@ export default async function HomePage() {
       name: s.title,
       url: null,
       date: s.date ? s.date.toISOString() : null,
+      isAllDay: s.isAllDay,
       pointsPossible: null,
       syllabusKind: s.kind,
       detail: s.detail,
@@ -85,10 +92,14 @@ export default async function HomePage() {
                 Last sync had a problem: {canvasAccount.lastSyncError}
               </p>
             )}
-            <Timeline entries={entries} />
+            <Timeline entries={entries} timeZone={timeZone} />
             {canvasAccount.lastSyncedAt && (
               <p className="mt-8 text-xs text-[var(--muted)]">
-                Last synced {canvasAccount.lastSyncedAt.toLocaleString()}
+                Last synced{" "}
+                {formatInZone(canvasAccount.lastSyncedAt, timeZone, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}
               </p>
             )}
           </>

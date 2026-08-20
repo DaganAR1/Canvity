@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { buildTimeline, TimelineEntry } from "@/lib/timeline";
+import { formatAllDay, formatInZone } from "@/lib/timezone";
 
 const TIER_STYLES: Record<string, { dot: string; label: string; text: string }> = {
   critical: { dot: "bg-red-500", label: "Critical", text: "text-red-600" },
@@ -12,12 +13,12 @@ const TIER_STYLES: Record<string, { dot: string; label: string; text: string }> 
   done: { dot: "bg-green-500", label: "Done", text: "text-green-600" },
 };
 
-export default function Timeline({ entries }: { entries: TimelineEntry[] }) {
+export default function Timeline({ entries, timeZone }: { entries: TimelineEntry[]; timeZone: string }) {
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  const buckets = useMemo(() => buildTimeline(entries), [entries]);
+  const buckets = useMemo(() => buildTimeline(entries, timeZone), [entries, timeZone]);
 
   async function handleSync() {
     setSyncing(true);
@@ -110,7 +111,7 @@ export default function Timeline({ entries }: { entries: TimelineEntry[] }) {
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--muted)]">
                           <span>{entry.course.courseCode || entry.course.name}</span>
                           <span aria-hidden>·</span>
-                          <span>{formatDue(entry.date)}</span>
+                          <span>{formatDue(entry.date, entry.isAllDay, timeZone)}</span>
                           {entry.pointsPossible !== null && (
                             <>
                               <span aria-hidden>·</span>
@@ -141,14 +142,12 @@ export default function Timeline({ entries }: { entries: TimelineEntry[] }) {
   );
 }
 
-function formatDue(date: string | null): string {
+function formatDue(date: string | null, isAllDay: boolean, timeZone: string): string {
   if (!date) return "No due date";
   const parsed = new Date(date);
-  return parsed.toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  // An all-day item has no real clock time to show — displaying one (always
+  // midnight, an artifact of how it's stored) would just misrepresent it.
+  return isAllDay
+    ? formatAllDay(parsed, { weekday: "short", month: "short", day: "numeric" })
+    : formatInZone(parsed, timeZone, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }

@@ -2,31 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { sendDigestEmail } from "@/lib/email";
+import { dayIndexInZone, safeTimeZone, zonedHour } from "@/lib/timezone";
 
 // Run hourly via Vercel Cron. Sends each user their digest once per day, at
-// their configured local-ish hour (digestHour, stored in UTC), guarded by
-// lastDigestSentAt so re-runs within the same day don't double-send.
+// their configured hour in their own timeZone, guarded by lastDigestSentAt so
+// re-runs within the same local day don't double-send.
 export async function GET(req: NextRequest) {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const now = new Date();
-  const currentHour = now.getUTCHours();
 
-  const users = await prisma.user.findMany({
-    where: {
-      digestEnabled: true,
-      digestHour: currentHour,
-      canvasAccount: { isNot: null },
-    },
+  // digestHour can't be matched in SQL — it's a wall-clock hour in each user's
+  // own zone, not a fixed UTC offset — so every enabled user is fetched and the
+  // hour match is done in JS.
+  const candidates = await prisma.user.findMany({
+    where: { digestEnabled: true, canvasAccount: { isNot: null } },
   });
+  const users = candidates.filter((u) => zonedHour(now, safeTimeZone(u.timeZone)) === u.digestHour);
 
   let sent = 0;
   let failed = 0;
 
   for (const user of users) {
-    if (user.lastDigestSentAt && isSameUtcDay(user.lastDigestSentAt, now)) continue;
+    const timeZone = safeTimeZone(user.timeZone);
+    if (user.lastDigestSentAt && dayIndexInZone(user.lastDigestSentAt, timeZone) === dayIndexInZone(now, timeZone)) {
+      continue;
+    }
 
     const courseScope = { canvasAccount: { userId: user.id }, isActive: true };
 
@@ -50,6 +53,7 @@ export async function GET(req: NextRequest) {
         name: a.name,
         courseName: a.course.name,
         dueAt: a.dueAt,
+        isAllDay: false,
         priorityTier: a.priorityTier,
         priorityScore: a.priorityScore,
         fromSyllabus: false,
@@ -58,6 +62,7 @@ export async function GET(req: NextRequest) {
         name: s.title,
         courseName: s.course.name,
         dueAt: s.date,
+        isAllDay: s.isAllDay,
         priorityTier: s.priorityTier,
         priorityScore: s.priorityScore,
         fromSyllabus: true,
@@ -70,7 +75,7 @@ export async function GET(req: NextRequest) {
 
     // One user's delivery failure must not stop everyone else's digest.
     try {
-      await sendDigestEmail(user.email, entries);
+      await sendDigestEmail(user.email, entries, timeZone);
       await prisma.user.update({ where: { id: user.id }, data: { lastDigestSentAt: now } });
       sent++;
     } catch {
@@ -79,12 +84,4 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({ usersChecked: users.length, digestsSent: sent, failed });
-}
-
-function isSameUtcDay(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
-  );
 }
