@@ -114,7 +114,22 @@ with AES-256-GCM before it's stored, and never leaves the server afterwards.
 
 ## Deploying
 
-Deploy to Vercel and set the same environment variables in the project settings.
+The build script (`prisma generate && prisma migrate deploy && next build`) applies
+pending migrations automatically, so a fresh Postgres database — an empty Supabase
+project, for instance — ends up fully set up with no manual migration step.
+
+1. On [vercel.com](https://vercel.com), **Add New... → Project**, import this repo.
+2. Before deploying, expand **Environment Variables** and add:
+   - `DATABASE_URL` — your Postgres connection string
+   - `AUTH_SECRET`, `TOKEN_ENCRYPTION_KEY`, `CRON_SECRET` — each `openssl rand -base64 32`
+   - `NEXTAUTH_URL` — a placeholder is fine for the first deploy; fix it in step 4
+3. **Deploy**. Vercel only builds on a push to the connected branch — if the project
+   was created without an initial build (no deployments listed at all, "Create
+   Deployment" doesn't appear anywhere), push any commit to trigger one; there's no
+   button for a from-scratch first deploy when the repo already existed pre-import.
+4. Once it succeeds, copy the real URL Vercel assigned, set that as `NEXTAUTH_URL` in
+   Environment Variables, and redeploy once more so the login flow uses the right URL.
+
 `vercel.json` already registers three cron jobs:
 
 | Schedule | Endpoint | Job |
