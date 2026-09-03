@@ -112,6 +112,44 @@ In Canvas: **Account → Settings → New Access Token**. Copy it into Canvity a
 your school's Canvas domain (e.g. `myschool.instructure.com`). The token is encrypted
 with AES-256-GCM before it's stored, and never leaves the server afterwards.
 
+> **Many schools disable student-generated tokens.** If that page tells you to contact
+> your administrator, you can't use this path — see *Canvas access* below.
+
+### 5. Get a test course with real data in it
+
+Developing against your real school account is awkward (and read-only in practice), and
+a fresh Canvas account is empty. Instead:
+
+1. Register a free teacher account at [canvas.instructure.com/register](https://canvas.instructure.com/register)
+   — you're your own admin there, so token generation works normally.
+2. Create one course from the dashboard ("Start a new course").
+3. Populate it:
+
+```bash
+CANVAS_DOMAIN=canvas.instructure.com CANVAS_TOKEN=your_token npm run seed-canvas
+```
+
+That creates weighted assignment groups (Exams 50 / Homework 30 / Participation 20), a
+spread of assignments deliberately covering every timeline bucket — overdue, due today,
+this week, later, and one with no due date — and a syllabus whose important dates exist
+*only* in the syllabus, which is what the syllabus scanner is meant to catch. Re-running
+it skips anything already there.
+
+## Canvas access
+
+Personal access tokens only work where the institution allows them, and many disable
+them. The intended tiers:
+
+| Tier | Setup | Data |
+| --- | --- | --- |
+| Calendar feed | Copy a URL from Canvas → Calendar → "Calendar Feed". No token, no admin. | Assignments, due dates, courses |
+| Access token | Where the school permits it | Adds points, group weights, submission status, syllabus |
+| OAuth2 | Requires a developer key from the school's Canvas admin | Same as token, without the token friction |
+
+The feed tier is what makes the app reachable by any student regardless of institutional
+policy; syllabus scanning stays available there by letting students upload the PDF
+directly rather than fetching it through the API.
+
 ## Deploying
 
 The build script (`prisma generate && prisma migrate deploy && next build`) applies
