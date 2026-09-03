@@ -26,6 +26,85 @@ model User {
   // client detects and saves the real one; everything timezone-sensitive
   // (timeline "today", digest send time, notification text) reads this.
   timeZone String @default("UTC")
+
+  // Paid-plan flag. Wired through the app now so gating exists from the start,
+  // but nobody is charged yet — everyone runs as free until billing is live.
+  isPro Boolean @default(false)
+
+  studyPreference StudyPreference?
+  studyBlocks     StudyBlock[]
+}
+
+// How this student wants their week to look. Collected once via a short
+// questionnaire, then used to lay study blocks into the hours they actually
+// have free — and to put the hardest work in the hours they focus best.
+model StudyPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Hours per week the student wants to study. The scheduler treats this as a
+  /// ceiling, not a quota — it won't invent work to fill the time.
+  weeklyTargetHours Float @default(10)
+  /// Length of one focused block. Sessions are never split below this.
+  sessionMinutes    Int   @default(50)
+  breakMinutes      Int   @default(10)
+  /// Cap per day, so a looming deadline can't schedule an eight-hour Saturday.
+  maxHoursPerDay    Float @default(4)
+
+  /// Earliest/latest wall-clock hour (0-23) the student is willing to study, in
+  /// their own timeZone.
+  earliestHour Int @default(9)
+  latestHour   Int @default(22)
+
+  /// The window where they focus best — highest-priority work is placed here
+  /// first. Same 0-23 wall-clock scale.
+  peakStartHour Int @default(9)
+  peakEndHour   Int @default(12)
+
+  /// Days they're willing to study, as ISO weekday numbers (1 = Monday .. 7 = Sunday).
+  studyDays Int[] @default([1, 2, 3, 4, 5, 6, 7])
+
+  /// Minimum lead time before a deadline that work should be finished, in hours.
+  /// Keeps the plan from scheduling an essay block that ends ten minutes before
+  /// it is due.
+  finishAheadHours Int @default(12)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One planned (or completed) chunk of study time. Generated blocks are replaced
+// wholesale on each re-plan; blocks the student created or completed are kept.
+model StudyBlock {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // What this block is for. Exactly one is set for generated blocks; both are
+  // null for a block the student added freehand.
+  assignmentId   String?
+  assignment     Assignment?   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  syllabusItemId String?
+  syllabusItem   SyllabusItem? @relation(fields: [syllabusItemId], references: [id], onDelete: Cascade)
+
+  /// Shown when the block isn't tied to an assignment (e.g. "Review Chem ch. 4").
+  title String?
+
+  startAt DateTime
+  endAt   DateTime
+
+  /// "planned" | "done" | "skipped"
+  status String @default("planned")
+  /// False for blocks the student added by hand, which re-planning must not delete.
+  isGenerated Boolean @default(true)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([userId, startAt])
+  @@index([assignmentId])
 }
 
 model CanvasAccount {
@@ -93,6 +172,7 @@ model SyllabusItem {
   updatedAt DateTime @updatedAt
 
   notificationLogs NotificationLog[]
+  studyBlocks      StudyBlock[]
 
   @@index([courseId])
   @@index([date])
@@ -120,6 +200,7 @@ model Assignment {
   updatedAt         DateTime @updatedAt
 
   notificationLogs NotificationLog[]
+  studyBlocks      StudyBlock[]
 
   @@unique([courseId, canvasAssignmentId])
   @@index([dueAt])
