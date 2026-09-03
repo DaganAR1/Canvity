@@ -130,25 +130,37 @@ project, for instance — ends up fully set up with no manual migration step.
 4. Once it succeeds, copy the real URL Vercel assigned, set that as `NEXTAUTH_URL` in
    Environment Variables, and redeploy once more so the login flow uses the right URL.
 
-`vercel.json` already registers three cron jobs:
+`vercel.json` registers three cron jobs, once per day each:
 
-| Schedule | Endpoint | Job |
+| Schedule (UTC) | Endpoint | Job |
 | --- | --- | --- |
-| Every 4 hours | `/api/cron/sync` | Pull fresh Canvas data for every connected account |
-| Every 30 min | `/api/cron/notify` | Send push reminders for due-soon and critical work |
-| Hourly | `/api/cron/digest` | Send each user their daily digest at their chosen hour |
+| 06:00 | `/api/cron/sync` | Pull fresh Canvas data for every connected account |
+| 07:00 | `/api/cron/notify` | Send push reminders for due-soon and critical work |
+| 08:00 | `/api/cron/digest` | Send each user their daily digest |
+
+> **Why once a day, not every 30 minutes:** Vercel's free Hobby plan flatly rejects any
+> cron schedule that would run more than once a day — the deploy itself fails with
+> "Hobby accounts are limited to daily cron jobs," not a warning, a hard failure. The
+> schedules above are deliberately staggered (sync, then notify, then digest an hour
+> apart) so each one acts on data the previous one just refreshed. On Hobby this also
+> means the digest's per-user `digestHour` setting mostly doesn't do what it implies:
+> the cron only checks once a day at 08:00 UTC, so only users whose chosen hour happens
+> to land there actually get a digest at their preferred time — everyone else is
+> effectively on hold until this gets revisited, or until upgrading to Pro restores
+> per-minute scheduling and the hourly check that makes `digestHour` meaningful again.
+> Push reminders and manual sync aren't affected by this — those still work regardless.
 
 All three require `Authorization: Bearer $CRON_SECRET`, which Vercel Cron sends
-automatically. You can trigger one by hand to test:
+automatically. You can trigger one by hand at any time, independent of the schedule:
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" https://your-app.vercel.app/api/cron/sync
 ```
 
-Notifications are de-duplicated per assignment via the `NotificationLog` table, so a
-30-minute cron never sends the same reminder twice. Digests are guarded to once per
-calendar day *in the user's own timezone*, so a user near a UTC day boundary can't be
-sent two digests in one local day, or skipped in another.
+Notifications are de-duplicated per assignment via the `NotificationLog` table, so
+re-running `notify` never sends the same reminder twice. Digests are guarded to once
+per calendar day *in the user's own timezone*, so a user near a UTC day boundary can't
+be sent two digests in one local day, or skipped in another.
 
 ## Timezones
 
