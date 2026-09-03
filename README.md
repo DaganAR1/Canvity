@@ -115,18 +115,19 @@ with AES-256-GCM before it's stored, and never leaves the server afterwards.
 > **Many schools disable student-generated tokens.** If that page tells you to contact
 > your administrator, you can't use this path — see *Canvas access* below.
 
-### 5. Get a test course with real data in it
+### 5. Getting real data to develop against
 
-Developing against your real school account is awkward (and read-only in practice), and
-a fresh Canvas account is empty. Instead:
+The simplest option needs no token at all: connect your own school Canvas by
+**calendar feed** (Settings → Canvas connection → Calendar feed). That works even where
+token generation is disabled, and gives you real assignments immediately.
 
-1. Register a free teacher account at [canvas.instructure.com/register](https://canvas.instructure.com/register)
-   — you're your own admin there, so token generation works normally.
-2. Create one course from the dashboard ("Start a new course").
-3. Populate it:
+For the token path you need a Canvas instance you administer. Instructure's
+Free-for-Teacher program — long the standard way to get one — was discontinued, so the
+remaining options are a Canvas free trial or a self-hosted instance. Once you have one,
+seed it with a realistic corpus:
 
 ```bash
-CANVAS_DOMAIN=canvas.instructure.com CANVAS_TOKEN=your_token npm run seed-canvas
+CANVAS_DOMAIN=your.canvas.host CANVAS_TOKEN=your_token npm run seed-canvas
 ```
 
 That creates weighted assignment groups (Exams 50 / Homework 30 / Participation 20), a
@@ -140,15 +141,25 @@ it skips anything already there.
 Personal access tokens only work where the institution allows them, and many disable
 them. The intended tiers:
 
-| Tier | Setup | Data |
-| --- | --- | --- |
-| Calendar feed | Copy a URL from Canvas → Calendar → "Calendar Feed". No token, no admin. | Assignments, due dates, courses |
-| Access token | Where the school permits it | Adds points, group weights, submission status, syllabus |
-| OAuth2 | Requires a developer key from the school's Canvas admin | Same as token, without the token friction |
+| Tier | Setup | Data | Status |
+| --- | --- | --- | --- |
+| Calendar feed | Copy a URL from Canvas → Calendar → "Calendar Feed". No token, no admin. | Assignments, due dates, courses | **Built** |
+| Access token | Where the school permits it | Adds points, group weights, submission status, syllabus | Built |
+| OAuth2 | Requires a developer key from the school's Canvas admin | Same as token, without the token friction | Not built |
 
-The feed tier is what makes the app reachable by any student regardless of institutional
-policy; syllabus scanning stays available there by letting students upload the PDF
-directly rather than fetching it through the API.
+Settings → Canvas connection offers both built paths. The feed is the default, since it
+is the only one that works regardless of institutional policy.
+
+What the feed gives up, and how the app compensates:
+
+- **No point values or group weights.** Priority scoring falls back to urgency plus the
+  per-course importance you set by hand in Settings, rather than urgency plus real grade
+  impact.
+- **No submission status.** Nothing disappears automatically when you submit it — mark
+  work done yourself. A re-sync deliberately never resets that flag.
+- **No syllabus content.** Syllabus scanning needs the REST API, so on a feed connection
+  it reports that clearly instead of failing quietly. Uploading the syllabus file
+  directly is the intended replacement.
 
 ## Deploying
 

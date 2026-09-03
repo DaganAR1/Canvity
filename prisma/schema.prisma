@@ -112,7 +112,20 @@ model CanvasAccount {
   userId        String   @unique
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   domain        String // e.g. canvas.instructure.com
-  encryptedToken String // AES-encrypted Canvas API personal access token
+
+  /// How this account reads Canvas: "token" (full REST API) or "feed" (the
+  /// student's private calendar feed URL, which needs no token and no admin
+  /// approval — the only route available where an institution disables
+  /// student token generation).
+  connectionType String @default("token")
+
+  /// AES-encrypted Canvas API personal access token. Null for feed accounts.
+  encryptedToken String?
+  /// AES-encrypted calendar feed URL. The URL itself embeds a secret that
+  /// grants read access to the student's calendar, so it is stored encrypted
+  /// exactly like a token. Null for token accounts.
+  encryptedFeedUrl String?
+
   lastSyncedAt  DateTime?
   lastSyncError String?
   createdAt     DateTime @default(now())
@@ -191,6 +204,9 @@ model Assignment {
   groupWeight       Float?   // weight (%) of the assignment group this belongs to, if set on the course
   submittedAt       DateTime?
   hasSubmitted      Boolean  @default(false)
+  /// True when the due date carried no time of day. Feed-derived assignments
+  /// can be date-only; REST-derived ones always have a real instant.
+  isAllDay          Boolean  @default(false)
 
   // computed priority score (higher = more urgent/important), recomputed on every sync
   priorityScore     Float    @default(0)

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { decryptToken } from "@/lib/crypto";
 import { CanvasApiError, CanvasClient } from "@/lib/canvas";
 import { computePriority, computeSyllabusPriority } from "@/lib/priority";
+import { syncFromFeed } from "@/lib/feed-sync";
 import { effectiveInstant } from "@/lib/syllabus";
 import { safeTimeZone } from "@/lib/timezone";
 
@@ -21,6 +22,15 @@ export async function syncUserCanvasData(userId: string): Promise<SyncResult> {
     throw new Error("No Canvas account is connected for this user");
   }
 
+  // Feed-connected accounts take an entirely different path: no API, no token.
+  if (canvasAccount.connectionType === "feed") {
+    const result = await syncFromFeed(userId);
+    return { coursesSynced: result.coursesSynced, assignmentsSynced: result.assignmentsSynced };
+  }
+
+  if (!canvasAccount.encryptedToken) {
+    throw new Error("This Canvas account has no API token saved");
+  }
   const token = decryptToken(canvasAccount.encryptedToken);
   const client = new CanvasClient(canvasAccount.domain, token);
 

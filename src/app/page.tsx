@@ -43,7 +43,7 @@ export default async function HomePage() {
       name: a.name,
       url: a.htmlUrl,
       date: a.dueAt ? a.dueAt.toISOString() : null,
-      isAllDay: false,
+      isAllDay: a.isAllDay,
       pointsPossible: a.pointsPossible,
       syllabusKind: null,
       detail: null,

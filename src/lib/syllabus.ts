@@ -36,6 +36,11 @@ export async function scanCourseSyllabus(courseId: string, opts: { force?: boole
   // the course owner's own clock rather than assumed to be UTC.
   const timeZone = safeTimeZone(course.canvasAccount.user.timeZone);
 
+  if (!course.canvasAccount.encryptedToken) {
+    throw new SyllabusNotFoundError(
+      "Syllabus scanning needs Canvas API access. This account is connected by calendar feed, which cannot fetch syllabus content — upload the syllabus file instead."
+    );
+  }
   const token = decryptToken(course.canvasAccount.encryptedToken);
   const client = new CanvasClient(course.canvasAccount.domain, token);
   const canvasCourseId = Number(course.canvasCourseId);

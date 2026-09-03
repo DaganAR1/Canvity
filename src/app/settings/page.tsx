@@ -21,6 +21,7 @@ export default async function SettingsPage() {
       canvasAccount: {
         select: {
           domain: true,
+          connectionType: true,
           lastSyncedAt: true,
           courses: {
             select: { id: true, name: true, courseCode: true, weight: true },
@@ -44,6 +45,7 @@ export default async function SettingsPage() {
             user.canvasAccount
               ? {
                   domain: user.canvasAccount.domain,
+                  connectionType: user.canvasAccount.connectionType,
                   lastSyncedAt: user.canvasAccount.lastSyncedAt?.toISOString() ?? null,
                 }
               : null
