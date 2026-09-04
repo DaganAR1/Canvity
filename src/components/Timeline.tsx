@@ -17,8 +17,42 @@ export default function Timeline({ entries, timeZone }: { entries: TimelineEntry
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+  // Checked-off items disappear on the next server render; track them locally
+  // so the row responds immediately instead of after a round trip.
+  const [completing, setCompleting] = useState<Set<string>>(new Set());
 
   const buckets = useMemo(() => buildTimeline(entries, timeZone), [entries, timeZone]);
+  const overdueCount = buckets.find((b) => b.key === "overdue")?.entries.length ?? 0;
+
+  async function markDone(assignmentId: string) {
+    setCompleting((prev) => new Set(prev).add(assignmentId));
+    const res = await fetch(`/api/assignments/${assignmentId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hasSubmitted: true }),
+    });
+    if (!res.ok) {
+      setCompleting((prev) => {
+        const next = new Set(prev);
+        next.delete(assignmentId);
+        return next;
+      });
+      return;
+    }
+    router.refresh();
+  }
+
+  async function clearOverdue() {
+    setClearing(true);
+    await fetch("/api/assignments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "complete_overdue" }),
+    });
+    setClearing(false);
+    router.refresh();
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -55,6 +89,22 @@ export default function Timeline({ entries, timeZone }: { entries: TimelineEntry
         </p>
       )}
 
+      {overdueCount >= 3 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm dark:border-amber-900 dark:bg-amber-950">
+          <span className="text-amber-800 dark:text-amber-200">
+            {overdueCount} items are past due. A calendar feed can&apos;t tell what you&apos;ve already
+            submitted, so finished work shows up here.
+          </span>
+          <button
+            onClick={clearOverdue}
+            disabled={clearing}
+            className="shrink-0 rounded-lg border border-amber-300 px-3 py-1.5 font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:text-amber-100 dark:hover:bg-amber-900"
+          >
+            {clearing ? "Clearing…" : "Mark all past due as done"}
+          </button>
+        </div>
+      )}
+
       {buckets.length === 0 ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-10 text-center">
           <p className="font-medium">Nothing on the timeline yet.</p>
@@ -80,7 +130,18 @@ export default function Timeline({ entries, timeZone }: { entries: TimelineEntry
                       key={entry.id}
                       className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
                     >
-                      <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${tier.dot}`} aria-hidden />
+                      {entry.assignmentId ? (
+                        <input
+                          type="checkbox"
+                          checked={completing.has(entry.assignmentId)}
+                          onChange={() => entry.assignmentId && markDone(entry.assignmentId)}
+                          title="Mark as done"
+                          aria-label={`Mark ${entry.name} as done`}
+                          className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-green-600"
+                        />
+                      ) : (
+                        <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${tier.dot}`} aria-hidden />
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-3">
                           <span className="flex min-w-0 items-baseline gap-2">

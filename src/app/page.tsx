@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import Nav from "@/components/Nav";
 import Timeline from "@/components/Timeline";
+import TimezoneSync from "@/components/TimezoneSync";
 import { TimelineEntry } from "@/lib/timeline";
 import { formatInZone, safeTimeZone } from "@/lib/timezone";
 
@@ -44,6 +45,7 @@ export default async function HomePage() {
       url: a.htmlUrl,
       date: a.dueAt ? a.dueAt.toISOString() : null,
       isAllDay: a.isAllDay,
+      assignmentId: a.id,
       pointsPossible: a.pointsPossible,
       syllabusKind: null,
       detail: null,
@@ -58,6 +60,7 @@ export default async function HomePage() {
       url: null,
       date: s.date ? s.date.toISOString() : null,
       isAllDay: s.isAllDay,
+      assignmentId: null,
       pointsPossible: null,
       syllabusKind: s.kind,
       detail: s.detail,
@@ -69,6 +72,7 @@ export default async function HomePage() {
 
   return (
     <>
+      <TimezoneSync storedTimeZone={user?.timeZone ?? "UTC"} />
       <Nav />
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
         {!canvasAccount ? (

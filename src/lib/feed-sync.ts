@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { decryptToken } from "@/lib/crypto";
 import { computePriority } from "@/lib/priority";
 import { parseIcs, IcsEvent } from "@/lib/ics";
+import { safeTimeZone } from "@/lib/timezone";
 
 export interface FeedSyncResult {
   coursesSynced: number;
@@ -24,7 +25,10 @@ const MAX_FEED_BYTES = 5_000_000;
  * completion has to be marked manually rather than detected.
  */
 export async function syncFromFeed(userId: string): Promise<FeedSyncResult> {
-  const account = await prisma.canvasAccount.findUnique({ where: { userId } });
+  const account = await prisma.canvasAccount.findUnique({
+    where: { userId },
+    include: { user: { select: { timeZone: true } } },
+  });
   if (!account) throw new FeedSyncError("No Canvas account is connected for this user");
   if (!account.encryptedFeedUrl) throw new FeedSyncError("This account has no calendar feed URL saved");
 
@@ -50,7 +54,9 @@ export async function syncFromFeed(userId: string): Promise<FeedSyncResult> {
     throw err instanceof FeedSyncError ? err : new FeedSyncError(message);
   }
 
-  const events = parseIcs(raw);
+  // Feeds can carry wall-clock times with no zone attached; those mean the
+  // student's own local time, so the parser needs to know what that is.
+  const events = parseIcs(raw, safeTimeZone(account.user.timeZone));
   if (events.length === 0 && !raw.includes("BEGIN:VCALENDAR")) {
     const message = "That URL didn't return a calendar. Double-check you copied the Calendar Feed link.";
     await prisma.canvasAccount.update({ where: { id: account.id }, data: { lastSyncError: message } });

@@ -18,6 +18,8 @@ export interface TimelineEntry {
    * due_at is already a real, timezone-resolved instant.
    */
   isAllDay: boolean;
+  /** Set for assignments, so they can be checked off. Null for syllabus items. */
+  assignmentId: string | null;
   /** Assignments only. */
   pointsPossible: number | null;
   /** Syllabus items only: what kind of thing it is, and any extra specifics. */

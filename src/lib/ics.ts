@@ -8,6 +8,8 @@
 // It carries less than the REST API does: assignment names, due dates, course
 // codes and links, but no point values, group weights, or submission status.
 
+import { isValidTimeZone, safeTimeZone, zonedTimeToUtc } from "@/lib/timezone";
+
 export interface IcsEvent {
   /** Stable identifier from the feed, used to avoid duplicating on re-sync. */
   uid: string;
@@ -70,12 +72,24 @@ function unescapeText(value: string): string {
 }
 
 /**
- * Parses an iCalendar date value. Three shapes appear in practice:
- * `20260904T235900Z` (UTC), `20260904T235900` (floating local time, which we
- * read as UTC since the feed gives us no zone), and `20260904` (a calendar
- * date with no time, flagged as all-day so it is never compared to a clock).
+ * Parses an iCalendar date value. Four shapes appear in practice:
+ *
+ *   20260904T235900Z                     — an absolute UTC instant
+ *   DTSTART;TZID=America/New_York:...    — wall-clock time in a named zone
+ *   20260904T235900                      — "floating" time, meaning whatever
+ *                                          local time the reader is in
+ *   20260904 (VALUE=DATE)                — a calendar date, no time at all
+ *
+ * The TZID and floating cases both need a zone to resolve against, and getting
+ * that wrong shifts a deadline by the whole UTC offset — enough to make work
+ * due tonight read as already overdue. Floating values fall back to the
+ * viewer's own zone, which is what the spec intends by "local time".
  */
-export function parseIcsDate(value: string, params: Record<string, string> = {}): { date: Date | null; isAllDay: boolean } {
+export function parseIcsDate(
+  value: string,
+  params: Record<string, string> = {},
+  fallbackTimeZone = "UTC"
+): { date: Date | null; isAllDay: boolean } {
   const v = value.trim();
 
   if (params.VALUE === "DATE" || /^\d{8}$/.test(v)) {
@@ -85,12 +99,27 @@ export function parseIcsDate(value: string, params: Record<string, string> = {})
     return { date: Number.isNaN(date.getTime()) ? null : date, isAllDay: true };
   }
 
-  const m = v.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/);
+  // Seconds are optional; some producers emit only HHMM.
+  const m = v.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z?)$/);
   if (!m) return { date: null, isAllDay: false };
 
-  const date = new Date(
-    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]))
-  );
+  const [, y, mo, d, h, min, sec, zulu] = m;
+  const year = Number(y);
+  const month = Number(mo);
+  const day = Number(d);
+  const hour = Number(h);
+  const minute = Number(min);
+  const second = Number(sec ?? "0");
+
+  if (zulu === "Z") {
+    const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    return { date: Number.isNaN(date.getTime()) ? null : date, isAllDay: false };
+  }
+
+  // Wall-clock time: resolve against the event's own zone when it names one,
+  // otherwise the viewer's.
+  const zone = params.TZID && isValidTimeZone(params.TZID) ? params.TZID : safeTimeZone(fallbackTimeZone);
+  const date = zonedTimeToUtc(year, month, day, hour, minute, zone);
   return { date: Number.isNaN(date.getTime()) ? null : date, isAllDay: false };
 }
 
@@ -116,7 +145,7 @@ function idsFromUrl(url: string | null): { courseId: string | null; assignmentId
   return { courseId: course?.[1] ?? null, assignmentId: assignment?.[1] ?? null };
 }
 
-export function parseIcs(raw: string): IcsEvent[] {
+export function parseIcs(raw: string, fallbackTimeZone = "UTC"): IcsEvent[] {
   const lines = unfoldLines(raw);
   const events: IcsEvent[] = [];
 
@@ -129,7 +158,7 @@ export function parseIcs(raw: string): IcsEvent[] {
       continue;
     }
     if (trimmed === "END:VEVENT") {
-      if (current) events.push(buildEvent(current));
+      if (current) events.push(buildEvent(current, fallbackTimeZone));
       current = null;
       continue;
     }
@@ -147,13 +176,16 @@ export function parseIcs(raw: string): IcsEvent[] {
   return events;
 }
 
-function buildEvent(fields: Record<string, { value: string; params: Record<string, string> }>): IcsEvent {
+function buildEvent(
+  fields: Record<string, { value: string; params: Record<string, string> }>,
+  fallbackTimeZone: string
+): IcsEvent {
   const summaryRaw = fields.SUMMARY ? unescapeText(fields.SUMMARY.value) : "";
   const { title, courseCode } = splitSummary(summaryRaw);
 
   const dtstart = fields.DTSTART;
   const { date, isAllDay } = dtstart
-    ? parseIcsDate(dtstart.value, dtstart.params)
+    ? parseIcsDate(dtstart.value, dtstart.params, fallbackTimeZone)
     : { date: null, isAllDay: false };
 
   const url = fields.URL?.value?.trim() || null;
