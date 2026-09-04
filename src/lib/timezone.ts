@@ -78,6 +78,17 @@ export function dayIndexInZone(date: Date, timeZone: string): number {
   return dayIndexFromParts(year, month, day);
 }
 
+/** Inverse of `dayIndexFromParts` — turns a day number back into a calendar date. */
+export function partsFromDayIndex(dayIndex: number): { year: number; month: number; day: number } {
+  const d = new Date(dayIndex * 86_400_000);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
+/** Day of the week for a calendar date: 0 = Sunday .. 6 = Saturday. */
+export function weekdayFromParts(year: number, month: number, day: number): number {
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
 /**
  * The calendar day a date-only value represents. Such values are stored at UTC
  * midnight and mean a calendar date, not an instant, so they are read back in
