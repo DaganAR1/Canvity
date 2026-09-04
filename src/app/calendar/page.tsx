@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import Nav from "@/components/Nav";
 import CalendarMonth from "@/components/CalendarMonth";
 import TimezoneSync from "@/components/TimezoneSync";
+import AutoSync from "@/components/AutoSync";
 import { buildMonthGrid, CalendarItem, parseMonthParam } from "@/lib/calendar";
 import { partsFromDayIndex, safeTimeZone } from "@/lib/timezone";
 
@@ -19,10 +20,13 @@ export default async function CalendarPage({
 
   const { month: monthParam } = await searchParams;
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { timeZone: true },
-  });
+  const [user, canvasAccount] = await Promise.all([
+    prisma.user.findUnique({ where: { id: session.user.id }, select: { timeZone: true } }),
+    prisma.canvasAccount.findUnique({
+      where: { userId: session.user.id },
+      select: { lastSyncedAt: true },
+    }),
+  ]);
   const timeZone = safeTimeZone(user?.timeZone);
   const { year, month } = parseMonthParam(monthParam, timeZone);
 
@@ -95,6 +99,9 @@ export default async function CalendarPage({
   return (
     <>
       <TimezoneSync storedTimeZone={user?.timeZone ?? "UTC"} />
+      {canvasAccount && (
+        <AutoSync lastSyncedAt={canvasAccount.lastSyncedAt?.toISOString() ?? null} />
+      )}
       <Nav />
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
         <CalendarMonth grid={grid} timeZone={timeZone} />

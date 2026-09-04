@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import Nav from "@/components/Nav";
 import Timeline from "@/components/Timeline";
 import TimezoneSync from "@/components/TimezoneSync";
+import AutoSync from "@/components/AutoSync";
 import { TimelineEntry } from "@/lib/timeline";
 import { formatInZone, safeTimeZone } from "@/lib/timezone";
 
@@ -73,6 +74,9 @@ export default async function HomePage() {
   return (
     <>
       <TimezoneSync storedTimeZone={user?.timeZone ?? "UTC"} />
+      {canvasAccount && (
+        <AutoSync lastSyncedAt={canvasAccount.lastSyncedAt?.toISOString() ?? null} />
+      )}
       <Nav />
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
         {!canvasAccount ? (
